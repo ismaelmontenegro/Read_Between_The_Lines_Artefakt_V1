@@ -82,4 +82,4 @@ Key dependencies include:
 
 ## Authors
 
-[Ismael Montenegro]
+Ismael Montenegro
