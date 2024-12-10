@@ -1,0 +1,48 @@
+{% extends "otree/Page.html" %}
+{% load otree static %}
+
+{% block title %}
+Video Selection
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="form-group">
+        <label for="id_video_path">Enter Video File Path:</label>
+        <input type="text"
+               name="video_path"
+               id="id_video_path"
+               class="form-control"
+               required
+               placeholder="e.g., C:\Users\Videos\meeting.mp4">
+        <small class="form-text text-muted">Enter the full path to your video file</small>
+    </div>
+
+    <button class="btn btn-primary next-button otree-btn-next" style="margin-top: 20px;">
+        Next
+    </button>
+</div>
+
+<style>
+    .container {
+        max-width: 600px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    label {
+        display: block;
+        margin-bottom: 10px;
+        font-weight: bold;
+    }
+
+    .form-text {
+        margin-top: 5px;
+        color: #6c757d;
+    }
+</style>
+{% endblock %}

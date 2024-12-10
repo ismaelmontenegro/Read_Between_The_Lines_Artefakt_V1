@@ -1,0 +1,1058 @@
+{% extends "otree/Page.html" %}
+{% load otree static %}
+
+{% block title %}Meeting Analysis Results{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Loading Screen -->
+    <div id="loadingSection">
+        <img src="{% static 'global/loading-icon.gif' %}" alt="Loading" width="64" height="64"/>
+        <div class="loading-progress">
+            <div class="progress">
+                <div id="loadingProgress" class="progress-bar progress-bar-striped progress-bar-animated"
+                     role="progressbar" style="width: 0%">
+                </div>
+            </div>
+        </div>
+        <div id="loadingText" class="loading-text">Loading models...</div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="mainContent" style="display: none;">
+        <div class="container-fluid">
+            <!-- Top row with video and active visualization -->
+            <div class="row mb-4">
+                <!-- Video column -->
+                <div class="col-md-6">
+                    <div class="video-section">
+                        <video id="videoPlayer" class="video-player" controls>
+                            <source src="{{ static video_path }}" type="video/mp4">
+                        </video>
+                    </div>
+                </div>
+
+                <!-- Active visualization column -->
+                <div class="col-md-6">
+                    <div id="activeVisualization" class="active-viz-container">
+                        <!-- Active visualization will be displayed here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Visualization controls -->
+            <div class="row mb-3">
+                <div class="col-12">
+                    <div class="viz-controls">
+                        <label for="vizSelector" class="viz-label">Select Visualization:</label>
+                        <select id="vizSelector" class="form-select">
+                            <option value="overall-sentiment">Overall Meeting Mood</option>
+                            <option value="sentiment-timeline">Sentiment Timeline</option>
+                            <option value="speaking-time">Speaking Time Distribution</option>
+                            <option value="topic-analysis">Topic Analysis</option>
+                            <option value="speaker-polygon">Speaker Polygon</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Progress bar for analysis -->
+            <div id="analysisProgress">
+                <div class="progress">
+                    <div class="progress-bar" role="progressbar" style="width: 100%"></div>
+                </div>
+                <p>Analyzing video...</p>
+            </div>
+
+            <!-- Minimized visualizations container -->
+            <div class="row">
+                <div class="col-12">
+                    <div id="minimizedVisualizations" class="minimized-viz-container">
+                        <!-- Minimized versions of inactive visualizations will appear here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Transcript section -->
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div id="transcript" class="transcript-section card">
+                        <div class="card-body">
+                            <h5 class="card-title">Transcript</h5>
+                            <div class="transcript-content"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Chart.js and D3.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+
+<script>
+    // Visualization Manager Class
+    class VisualizationManager {
+    constructor() {
+        this.activeVizId = 'overall-sentiment';
+        this.vizContainer = document.getElementById('activeVisualization');
+        this.minimizedContainer = document.getElementById('minimizedVisualizations');
+        this.selector = document.getElementById('vizSelector');
+        this.visualizationData = {};
+
+        this.setupEventListeners();
+    }
+
+    setupEventListeners() {
+        this.selector.addEventListener('change', (e) => {
+            this.setActiveVisualization(e.target.value);
+        });
+    }
+
+    updateData(data) {
+        this.visualizationData = data;
+        this.updateAllVisualizations();
+        this.updateTranscript(data);
+    }
+
+    setActiveVisualization(vizId) {
+        this.activeVizId = vizId;
+        this.updateAllVisualizations();
+    }
+
+    updateAllVisualizations() {
+        // Update active visualization
+        this.vizContainer.innerHTML = this.createVisualization(this.activeVizId, true);
+
+        // Update minimized visualizations
+        this.minimizedContainer.innerHTML = '';
+        ['overall-sentiment', 'sentiment-timeline', 'speaking-time', 'topic-analysis', 'speaker-polygon'].forEach(vizId => {
+            if (vizId !== this.activeVizId) {
+                const minimizedViz = document.createElement('div');
+                minimizedViz.className = 'minimized-viz';
+                minimizedViz.innerHTML = this.createVisualization(vizId, false);
+                minimizedViz.onclick = () => {
+                    this.selector.value = vizId;
+                    this.setActiveVisualization(vizId);
+                }
+                this.minimizedContainer.appendChild(minimizedViz);
+            }
+        });
+    }
+
+    updateTranscript(data) {
+        const transcriptContent = document.querySelector('.transcript-content');
+        let html = '';
+        if (data.transcript) {
+            data.transcript.forEach(segment => {
+                html += `
+                    <div class="transcript-segment">
+                        <span class="speaker-label">${segment.speaker}</span>
+                        <span class="timestamp">${segment.start.toFixed(1)}s - ${segment.end.toFixed(1)}s</span>
+                        <span class="sentiment-emoji small">${getSentimentEmoji(segment.sentiment.polarity)}</span>
+                        <p class="segment-text">${segment.text}</p>
+                    </div>
+                `;
+            });
+        }
+        transcriptContent.innerHTML = html;
+    }
+
+    createVisualization(vizId, isActive) {
+        const data = this.visualizationData;
+        const size = isActive ? 'large' : 'small';
+
+        switch(vizId) {
+            case 'overall-sentiment':
+                return this.createOverallSentimentViz(data, size);
+            case 'sentiment-timeline':
+                return this.createSentimentTimelineViz(data, size);
+            case 'speaking-time':
+                return this.createSpeakingTimeViz(data, size);
+            case 'topic-analysis':
+                return this.createTopicAnalysisViz(data, size);
+             case 'speaker-polygon':
+                return this.createSpeakerPolygonViz(data, size);
+            default:
+                return '<p>Visualization not found</p>';
+        }
+    }
+
+    createSpeakerPolygonViz(data, size) {
+    if (!data?.speaker_statistics) {
+        return this.createLoadingState('Speaker Distribution');
+    }
+
+    const containerId = `speaker-polygon-${Math.random().toString(36).substr(2, 9)}`;
+    const containerHeight = size === 'large' ? '400px' : '150px';
+
+    const container = `
+        <div class="speaker-polygon-viz size-${size}">
+            <h4 class="viz-title">Speaker Distribution</h4>
+            <canvas id="${containerId}" style="height: ${containerHeight}; width: 100%;"></canvas>
+        </div>`;
+
+    setTimeout(() => {
+        const canvas = document.getElementById(containerId);
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Set canvas size
+        const dimension = size === 'large' ? 400 : 150;
+        canvas.width = dimension;
+        canvas.height = dimension;
+
+        const centerX = dimension / 2;
+        const centerY = dimension / 2;
+        const radius = size === 'large' ? 150 : 50;
+
+        // Get speaker data
+        const speakers = Object.keys(data.speaker_statistics);
+        const percentages = speakers.map(speaker =>
+            data.speaker_statistics[speaker].speaking_time_percentage);
+        const colors = speakers.map((_, index) => {
+            const hue = (index * 137.508) % 360;
+            return `hsl(${hue}, 70%, 60%)`;
+        });
+
+        // Find dominant speaker
+        const maxPercentage = Math.max(...percentages);
+        const dominantSpeakerIndex = percentages.indexOf(maxPercentage);
+
+        // Calculate points for polygon
+        const points = [];
+        const angleStep = (2 * Math.PI) / speakers.length;
+
+        speakers.forEach((_, index) => {
+            const angle = index * angleStep - Math.PI / 2;
+            const x = centerX + radius * Math.cos(angle);
+            const y = centerY + radius * Math.sin(angle);
+            points.push({ x, y });
+        });
+
+        // Calculate center circle position based on dominant speaker
+        const dominantAngle = dominantSpeakerIndex * angleStep - Math.PI / 2;
+        const pullStrength = maxPercentage / 100; // How much the circle is pulled (0 to 1)
+        const maxOffset = radius * 0.5; // Maximum distance the circle can be pulled
+
+        const circleCenterX = centerX + (maxOffset * pullStrength * Math.cos(dominantAngle));
+        const circleCenterY = centerY + (maxOffset * pullStrength * Math.sin(dominantAngle));
+
+        // Draw lines from moved center to points
+        points.forEach((point, index) => {
+            const percentage = percentages[index] / 100;
+            const color = colors[index];
+
+            // Draw line
+            ctx.beginPath();
+            ctx.moveTo(circleCenterX, circleCenterY);
+            ctx.lineTo(point.x, point.y);
+            ctx.strokeStyle = `${color}${Math.round(percentage * 255).toString(16).padStart(2, '0')}`;
+            ctx.lineWidth = Math.max(1, percentage * 10);
+            ctx.stroke();
+
+            // Draw node
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, size === 'large' ? 10 : 5, 0, 2 * Math.PI);
+            ctx.fillStyle = percentages[index] > 0 ? color : '#ccc';
+            ctx.fill();
+
+            // Add label if large size
+            if (size === 'large') {
+                ctx.fillStyle = percentages[index] > 0 ? color : '#666';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(speakers[index], point.x, point.y + 25);
+                ctx.fillText(`${percentages[index].toFixed(1)}%`, point.x, point.y + 40);
+            }
+        });
+
+        // Draw center circle in new position
+        ctx.beginPath();
+        ctx.arc(circleCenterX, circleCenterY, size === 'large' ? 20 : 8, 0, 2 * Math.PI);
+        ctx.fillStyle = '#4CAF50';
+        ctx.fill();
+
+    }, 100);
+
+    return container;
+}
+
+    createOverallSentimentViz(data, size) {
+    if (!data?.transcript?.length) {
+        return this.createLoadingState('Overall Sentiment');
+    }
+
+    // Calculate overall sentiment
+    const allSentiments = data.transcript.map(segment => segment.sentiment.polarity);
+    const averageSentiment = allSentiments.reduce((a, b) => a + b, 0) / allSentiments.length;
+
+    const emojiSize = size === 'large' ? '3em' : '1.5em';
+    const gaugeWidth = size === 'large' ? '300px' : '150px';
+
+    // Start with overall mood
+    let html = `
+        <div class="overall-sentiment-viz size-${size}">
+            <h4 class="viz-title">Overall Meeting Mood</h4>
+            <div class="sentiment-display">
+                <span class="sentiment-emoji" style="font-size: ${emojiSize}">
+                    ${getSentimentEmoji(averageSentiment)}
+                </span>
+                <div class="sentiment-gauge" style="width: ${gaugeWidth}">
+                    <div class="gauge-background">
+                        <div class="gauge-marker" style="left: ${(averageSentiment + 1) * 50}%"></div>
+                    </div>
+                    <div class="gauge-labels">
+                        <span>Negative</span>
+                        <span>Neutral</span>
+                        <span>Positive</span>
+                    </div>
+                </div>
+            </div>`;
+
+    // Add speaker sentiments if in large mode
+    if (size === 'large' && data.speaker_statistics) {
+        html += `
+            <div class="speaker-sentiments mt-4">
+                <h5 class="text-center mb-3">Speaker Sentiments</h5>
+                <div class="speaker-sentiment-grid">`;
+
+        for (const [speaker, stats] of Object.entries(data.speaker_statistics)) {
+            if (stats.sentiment && stats.sentiment.average_polarity !== undefined) {
+                const speakerSentiment = stats.sentiment.average_polarity;
+                html += `
+                    <div class="speaker-sentiment-card">
+                        <div class="speaker-label">${speaker}</div>
+                        <div class="sentiment-display">
+                            <span class="sentiment-emoji small">
+                                ${getSentimentEmoji(speakerSentiment)}
+                            </span>
+                            <div class="sentiment-gauge" style="width: ${gaugeWidth}">
+                                <div class="gauge-background">
+                                    <div class="gauge-marker" style="left: ${(speakerSentiment + 1) * 50}%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+            }
+        }
+
+        html += `
+                </div>
+            </div>`;
+    }
+
+    html += '</div>';
+    return html;
+}
+
+    createSentimentTimelineViz(data, size) {
+        if (!data?.transcript?.length) {
+            return this.createLoadingState('Sentiment Timeline');
+        }
+
+        const containerId = `sentiment-timeline-${Math.random().toString(36).substr(2, 9)}`;
+        const containerHeight = size === 'large' ? '350px' : '150px';
+
+        // Create container with canvas element
+        const container = `
+            <div class="sentiment-timeline-viz size-${size}">
+                <h4 class="viz-title">Sentiment Timeline</h4>
+                <canvas id="${containerId}" style="height: ${containerHeight}; width: 100%;"></canvas>
+            </div>`;
+
+        // Schedule chart creation after container is added to DOM
+        setTimeout(() => {
+            const canvas = document.getElementById(containerId);
+            if (!canvas) {
+                console.error('Canvas element not found:', containerId);
+                return;
+            }
+
+            try {
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    console.error('Could not get canvas context');
+                    return;
+                }
+
+                if (window.sentimentChart) {
+                    window.sentimentChart.destroy();
+                }
+
+                window.sentimentChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.transcript.map(segment => segment.start.toFixed(1)),
+                        datasets: [{
+                            label: 'Sentiment',
+                            data: data.transcript.map(segment => segment.sentiment.polarity),
+                            borderColor: 'rgb(75, 192, 192)',
+                            tension: 0.3,
+                            fill: false
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                min: -1,
+                                max: 1,
+                                display: size === 'large',
+                                title: {
+                                    display: size === 'large',
+                                    text: 'Sentiment (Negative → Positive) '
+                                },
+                                ticks: {
+                                    callback: function(value) {
+                                    if (value === -1) return 'Negative';
+                                    if (value === 0) return 'Neutral';
+                                    if (value === 1) return 'Positive';
+                                    return '';
+                                    }
+                                }
+                            },
+                            x: {
+                                display: size === 'large',
+                                title: {
+                                    display: size === 'large',
+                                    text: 'Time (seconds)'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: size === 'large'
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error creating sentiment timeline chart:', error);
+            }
+        }, 100);  // Increased timeout to ensure DOM is ready
+
+        return container;
+    }
+
+
+    createSpeakingTimeViz(data, size) {
+        if (!data?.speaker_statistics) {
+            return this.createLoadingState('Speaking Time');
+        }
+
+        const containerId = `speaking-time-${Math.random().toString(36).substr(2, 9)}`;
+        const containerHeight = size === 'large' ? '350px' : '150px';
+
+        // Create container with canvas element
+        const container = `
+            <div class="speaking-time-viz size-${size}">
+                <h4 class="viz-title">Speaking Time Distribution</h4>
+                <canvas id="${containerId}" style="height: ${containerHeight}; width: 100%;"></canvas>
+            </div>`;
+
+        // Schedule chart creation after container is added to DOM
+        setTimeout(() => {
+            const canvas = document.getElementById(containerId);
+            if (!canvas) {
+                console.error('Canvas element not found:', containerId);
+                return;
+            }
+
+            try {
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    console.error('Could not get canvas context');
+                    return;
+                }
+
+                if (window.speakingTimeChart) {
+                    window.speakingTimeChart.destroy();
+                }
+
+                const speakers = Object.keys(data.speaker_statistics);
+                const percentages = speakers.map(speaker =>
+                    data.speaker_statistics[speaker].speaking_time_percentage);
+                const colors = speakers.map((_, index) => {
+                    const hue = (index * 137.508) % 360;
+                    return `hsl(${hue}, 70%, 60%)`;
+                });
+
+                window.speakingTimeChart = new Chart(ctx, {
+                    type: 'pie',
+                    data: {
+                        labels: speakers,
+                        datasets: [{
+                            data: percentages,
+                            backgroundColor: colors,
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: size === 'large',
+                                position: 'bottom'
+                            },
+                            title: {
+                                display: true,
+                                text: 'Speaking Time Distribution'
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error creating speaking time chart:', error);
+            }
+        }, 100);  // Increased timeout to ensure DOM is ready
+
+        return container;
+    }
+
+    createTopicAnalysisViz(data, size) {
+    if (!data?.topics?.overall || !data?.topics?.per_speaker) {
+        return this.createLoadingState('Topic Analysis');
+    }
+
+    const topicBubbleSize = size === 'large' ? 'normal' : 'small';
+    const maxSpeakers = size === 'large' ? Infinity : 2;
+
+    let html = `
+        <div class="topic-analysis-viz size-${size}">
+            <h4 class="viz-title">Topic Analysis</h4>
+            <div class="topic-overview">
+                <div class="overall-topic size-${topicBubbleSize}">
+                    <h5>Meeting Main Topic</h5>
+                    <div class="topic-bubble main">
+                        ${data.topics.overall[0]?.name || 'Analyzing...'}
+                    </div>
+                </div>
+            </div>`;
+
+    if (size === 'large') {
+        let speakerCount = 0;
+        html += '<div class="speaker-topics">';
+        for (const [speaker, speakerData] of Object.entries(data.topics.per_speaker)) {
+            if (speakerCount >= maxSpeakers) break;
+            if (speakerData.topics?.length > 0) {
+                const similarity = speakerData.topic_similarities[0]?.similarity_score || 0;
+                const similarityPercentage = (similarity * 100).toFixed(1);
+                const color = getSimilarityColor(similarity);
+
+                html += `
+                    <div class="speaker-topic-container">
+                        <h6>${speaker}'s Topic Focus</h6>
+                        <div class="topic-bubble" style="border-color: ${color}">
+                            ${speakerData.topics[0].name}
+                        </div>
+                        <div class="similarity-meter">
+                            <div class="similarity-label">Alignment with the meeting main topic</div>
+                            <div class="progress">
+                                <div class="progress-bar text-center"
+                                     style="width: ${similarityPercentage}%; background-color: ${color}"
+                                     aria-valuenow="${similarityPercentage}"
+                                     aria-valuemin="0"
+                                     aria-valuemax="100">
+                                    ${similarityPercentage}%
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                speakerCount++;
+            }
+        }
+        html += '</div>';
+    } else {
+        // Simplified version for minimized state
+        const speakerCount = Object.keys(data.topics.per_speaker).length;
+        html += `<div class="topic-summary">Analyzing ${speakerCount} speaker topics</div>`;
+    }
+
+    html += '</div>';
+    return html;
+}
+
+    createLoadingState(vizName) {
+        return `
+            <div class="viz-loading">
+                <h4 class="viz-title">${vizName}</h4>
+                <div class="alert alert-info">
+                    Gathering data... Continue the conversation for analysis.
+                </div>
+            </div>`;
+    }
+}
+
+    // Helper Functions
+    function getSentimentEmoji(sentiment) {
+        if (sentiment <= -0.6) return '😡';
+        if (sentiment <= -0.2) return '😟';
+        if (sentiment <= 0.2) return '😐';
+        if (sentiment <= 0.6) return '🙂';
+        return '😊';
+    }
+
+    function getSimilarityColor(similarity) {
+        const hue = similarity * 120;
+        return `hsl(${hue}, 70%, 50%)`;
+    }
+
+    // Initialize visualization manager
+    const vizManager = new VisualizationManager();
+
+    // Start loading screen logic
+    document.addEventListener('DOMContentLoaded', function() {
+        const loadingSection = document.getElementById('loadingSection');
+        const mainContent = document.getElementById('mainContent');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const loadingProgress = document.getElementById('loadingProgress');
+        const loadingText = document.getElementById('loadingText');
+
+        let progress = 0;
+
+        const progressInterval = setInterval(() => {
+            if (progress < 90) {
+                progress += 10;
+                loadingProgress.style.width = progress + '%';
+            }
+        }, 500);
+
+        async function checkAnalysisReady() {
+            try {
+                const videoSrc = document.querySelector('#videoPlayer source').getAttribute('src');
+                const videoFilename = videoSrc.split('/').pop().split('.')[0];
+                const response = await fetch(`/static/DemoApp/meeting_analysis_${videoFilename}.json`);
+
+                if (response.ok) {
+                    loadingProgress.style.width = '100%';
+                    loadingText.textContent = 'Starting analysis...';
+
+                    setTimeout(() => {
+                        clearInterval(progressInterval);
+                        loadingSection.style.display = 'none';
+                        mainContent.style.display = 'block';
+                        videoPlayer.play().catch(e => console.log("Auto-play prevented:", e));
+                        fetchResults();
+                        setInterval(fetchResults, 5000);
+                    }, 1000);
+
+                    return true;
+                }
+            } catch (error) {
+                console.error('Error checking analysis status:', error);
+            }
+            return false;
+        }
+
+        const readyCheck = setInterval(async () => {
+            const isReady = await checkAnalysisReady();
+            if (isReady) {
+                clearInterval(readyCheck);
+            }
+        }, 1000);
+    });
+
+    async function fetchResults() {
+        console.log("Fetching results...");
+        const randomParam = Math.floor(Math.random() * 1000000);
+        const videoSrc = document.querySelector('#videoPlayer source').getAttribute('src');
+        const videoFilename = videoSrc.split('/').pop().split('.')[0];
+        const analysisUrl = `/static/DemoApp/meeting_analysis_${videoFilename}.json?random=${randomParam}`;
+
+        try {
+            const response = await fetch(analysisUrl);
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            const data = await response.json();
+            console.log("Fetched data:", data);
+            if (data.meeting_duration > 0) {
+                document.getElementById('analysisProgress').style.display = 'none';
+                vizManager.updateData(data);
+            }
+        } catch (error) {
+            console.error('Error fetching analysis:', error);
+        }
+    }
+</script>
+
+<style>
+    /* Container styles */
+    .container-fluid {
+        padding: 20px;
+    }
+
+    /* Loading screen styles */
+    #loadingSection {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: white;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    }
+
+    .loading-progress {
+        width: 300px;
+        margin: 20px;
+    }
+
+    .loading-text {
+        margin-top: 15px;
+        font-size: 1.1em;
+        color: #666;
+    }
+
+    /* Video player styles */
+    .video-player {
+        width: 100%;
+        max-height: 400px;
+        object-fit: contain;
+    }
+
+    /* Visualization container styles */
+    .active-viz-container {
+        height: 400px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 15px;
+        overflow-y: auto;
+    }
+
+    .viz-controls {
+        background: #fff;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+    }
+
+    .viz-label {
+        font-weight: 500;
+        margin-right: 10px;
+    }
+
+    .form-select {
+        width: auto;
+        display: inline-block;
+    }
+
+    .minimized-viz-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 15px;
+        margin-top: 20px;
+    }
+
+    .minimized-viz {
+        flex: 1 1 300px;
+        max-width: 400px;
+        height: 200px;
+        background: #fff;
+        border-radius: 8px;
+        padding: 15px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        cursor: pointer;
+        transition: transform 0.2s;
+    }
+
+    .minimized-viz:hover {
+        transform: translateY(-3px);
+    }
+
+    /* Sentiment visualization styles */
+    .sentiment-gauge {
+        width: 200px;
+        margin: 10px 0;
+    }
+
+    .gauge-background {
+        height: 20px;
+        background: linear-gradient(to right,
+            #ff4444 0%,
+            #ffff44 50%,
+            #44ff44 100%);
+        border-radius: 10px;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .gauge-marker {
+        position: absolute;
+        top: -5px;
+        width: 2px;
+        height: 30px;
+        background: black;
+        transform: translateX(-50%);
+    }
+
+    .gauge-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.8em;
+        color: #666;
+        margin-top: 5px;
+    }
+
+    .sentiment-emoji {
+        font-size: 2em;
+        margin-right: 10px;
+    }
+
+    .sentiment-emoji.large {
+        font-size: 3em;
+    }
+
+    .sentiment-emoji.small {
+        font-size: 1em;
+        margin: 0 5px;
+    }
+
+    .sentiment-display {
+        display: flex;
+        align-items: center;
+        margin-top: 10px;
+    }
+
+    /* Topic visualization styles */
+    .topic-overview {
+        margin-bottom: 2rem;
+        text-align: center;
+    }
+
+    .topic-bubble {
+        display: inline-block;
+        padding: 0.8rem 1.5rem;
+        border-radius: 20px;
+        background-color: #f8f9fa;
+        border: 2px solid #007bff;
+        margin: 0.5rem;
+        font-weight: 500;
+    }
+
+    .topic-bubble.main {
+        background-color: #007bff;
+        color: white;
+        border: none;
+        font-size: 1.1em;
+    }
+
+    .topic-keywords {
+        font-size: 0.9em;
+        color: #666;
+        margin: 0.5rem 0;
+    }
+
+    .speaker-topics {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.5rem;
+        justify-content: center;
+        margin-top: 2rem;
+    }
+
+    .speaker-topic-container {
+        flex: 1 1 300px;
+        max-width: 400px;
+        text-align: center;
+    }
+
+    /* Visualization size-specific styles */
+    .size-large {
+        height: 100%;
+        padding: 15px;
+    }
+
+    .size-small {
+        height: 100%;
+        padding: 10px;
+    }
+
+    .viz-title {
+        font-size: 1.1rem;
+        margin-bottom: 15px;
+        text-align: center;
+    }
+
+    .size-small .viz-title {
+        font-size: 0.9rem;
+        margin-bottom: 8px;
+    }
+
+    .size-small .topic-bubble {
+        padding: 5px 10px;
+        font-size: 0.8em;
+    }
+
+    .size-small .similarity-meter {
+        margin-top: 5px;
+    }
+
+    .size-small .progress {
+        height: 0.5rem;
+    }
+
+    .size-small .topic-summary {
+        font-size: 0.8em;
+        text-align: center;
+        color: #666;
+    }
+
+    .size-small .sentiment-gauge {
+        height: 10px;
+    }
+
+    .size-small .gauge-labels {
+        font-size: 0.7em;
+    }
+
+    /* Transcript styles */
+    .transcript-section {
+        margin-top: 20px;
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .transcript-segment {
+        margin: 10px 0;
+        padding: 10px;
+        border-left: 3px solid #007bff;
+        background: #f8f9fa;
+        border-radius: 4px;
+    }
+
+    .speaker-label {
+        font-weight: bold;
+        margin-right: 10px;
+        color: #007bff;
+    }
+
+    .timestamp {
+        color: #666;
+        font-size: 0.9em;
+        margin-right: 10px;
+    }
+
+    .segment-text {
+        margin: 5px 0 0 0;
+        line-height: 1.4;
+    }
+
+    /* Progress and alert styles */
+    .progress {
+        height: 1.5rem;
+        border-radius: 0.75rem;
+        background-color: #f0f0f0;
+    }
+    .progress-bar {
+        border-radius: 0.75rem;
+        line-height: 1.5rem;
+        font-weight: 500;
+        transition: width 0.5s ease;
+        position: relative;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        color: white;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+    .alert {
+        border-radius: 8px;
+        margin-bottom: 0;
+    }
+
+    /* Loading state styles */
+    .viz-loading {
+        text-align: center;
+        padding: 15px;
+    }
+
+    .size-small .viz-loading .alert {
+        padding: 5px;
+        font-size: 0.8em;
+    }
+
+    /* Similarity meter styles */
+    .similarity-meter {
+        margin-top: 1rem;
+        text-align: center;
+    }
+
+    .similarity-label {
+        font-size: 0.9em;
+        margin-bottom: 0.3rem;
+        color: #667;
+        text-align: center;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .active-viz-container {
+            height: 300px;
+            margin-top: 20px;
+        }
+
+        .minimized-viz {
+            height: 150px;
+        }
+
+        .viz-controls {
+            text-align: center;
+        }
+
+        .form-select {
+            width: 100%;
+            margin-top: 10px;
+        }
+    }
+    .speaker-sentiments {
+    border-top: 1px solid #dee2e6;
+    padding-top: 1rem;
+    }
+
+    .speaker-sentiment-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        max-width: 600px;
+        margin: 0 auto;
+    }
+
+    .speaker-sentiment-card {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 0.8rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .speaker-sentiment-card .speaker-label {
+        font-weight: 500;
+        color: #007bff;
+        margin-bottom: 0.5rem;
+    }
+
+    .speaker-sentiment-card .sentiment-display {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .speaker-sentiment-card .sentiment-gauge {
+        flex-grow: 1;
+    }
+</style>
+{% endblock %}
