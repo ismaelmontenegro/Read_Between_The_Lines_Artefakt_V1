@@ -56,7 +56,7 @@ otree devserver
 
 4. View real-time analysis results in the interactive dashboard
 
-## Project Structure
+## Application Structure
 
 - `DemoApp/` - Main application directory
   - `__init__.py` - oTree page and player definitions
@@ -80,6 +80,6 @@ Key dependencies include:
 - Analysis results are saved in JSON format in the `_static/DemoApp/` directory
 - Real-time processing simulates live analysis with configurable buffer sizes and overlap
 
-## Authors
+## Author
 
 Ismael Montenegro
