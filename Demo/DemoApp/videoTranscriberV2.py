@@ -35,7 +35,7 @@ class LiveMeetingAnalyzer:
         # Initialize models
         self.diarization_pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization",
-            use_auth_token="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"
+            use_auth_token="your-HF-token-here"
         ).to(self.device)
         self.embedding_model = Model.from_pretrained(
             "pyannote/embedding", use_auth_token="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"
