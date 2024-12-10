@@ -24,8 +24,8 @@ A web-based application for real-time analysis of video meetings, built with oTr
 
 1. Clone the repository:
 ```bash
-git clone [url]
-cd [name]
+git clone [https://github.com/ismaelmontenegro/Read_Between_The_Lines_Artefakt_V1.git]
+cd [Read_Between_The_Lines_Artefakt_V1.git]
 ```
 
 2. Create and activate a virtual environment:
