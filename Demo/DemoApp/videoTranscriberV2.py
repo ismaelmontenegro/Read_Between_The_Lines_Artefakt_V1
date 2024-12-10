@@ -30,7 +30,7 @@ class LiveMeetingAnalyzer:
         self.total_duration = None
         self.stop_processing = False
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") #check for cuda GPU availability, if unavailable use CPU
 
         # Initialize models
         self.diarization_pipeline = Pipeline.from_pretrained(
