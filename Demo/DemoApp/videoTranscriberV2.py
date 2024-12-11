@@ -41,7 +41,7 @@ class LiveMeetingAnalyzer:
             "pyannote/embedding", use_auth_token="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"
         ).to(self.device)
         self.inference = Inference(self.embedding_model, window="whole").to(self.device)
-        self.transcription_model = whisper.load_model("tiny",device="cuda")
+        self.transcription_model = whisper.load_model("tiny",device=self.device)
 
         # Speaker tracking
         self.speaker_embeddings = {}  # {speaker_id: embedding_vector}
