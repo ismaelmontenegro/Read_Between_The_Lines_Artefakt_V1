@@ -540,7 +540,7 @@ class LiveMeetingAnalyzer:
                 self.current_position += self.step_size
 
                 # Simulate real-time processing
-                time.sleep(self.step_size)  # Wait for step_size seconds
+                time.sleep(9.0)  
 
             print("\nAnalysis complete!")
 
